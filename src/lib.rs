@@ -1,1 +1,3 @@
-// src/lib.rs content from AI-Research/being32
+pub fn example_function() {
+    // Example function code
+}

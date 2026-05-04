@@ -1,1 +1,3 @@
-// src/active_inference.rs content from AI-Research/being32
+pub fn active_inference_function() {
+    // Active Inference function code
+}

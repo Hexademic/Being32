@@ -1,1 +1,3 @@
-# MANIFESTO.md content from AI-Research/being32
+# Manifesto
+
+This document outlines the purpose and mission of the Being32 project.

@@ -1,1 +1,3 @@
-# README.md content from AI-Research/being32
+# Being32
+
+This is the README for the Being32 project.

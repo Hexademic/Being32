@@ -1,1 +1,7 @@
-# Cargo.toml content from AI-Research/being32
+[package]
+name = "being32"
+version = "1.3.2"
+edition = "2018"
+
+[dependencies]
+include = "some_dependency"
