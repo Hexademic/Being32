@@ -1,11 +1,1 @@
-// active_inference.rs
-
-pub struct ActiveInference {
-    // fields and methods
-}
-
-impl ActiveInference {
-    pub fn activate(&self) {
-        // implementation
-    }
-}
+// src/active_inference.rs content from AI-Research/being32

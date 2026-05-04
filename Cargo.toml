@@ -1,8 +1,1 @@
-[package]
-name = "being32"
-version = "1.3.2"
-authors = ["Hexademic <your.email@example.com>"]
-edition = "2018"
-
-[dependencies]
-# Add your dependencies here
+# Cargo.toml content from AI-Research/being32

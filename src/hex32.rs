@@ -1,11 +1,1 @@
-// hex32.rs
-
-pub struct Hex32 {
-    // fields and methods
-}
-
-impl Hex32 {
-    pub fn compute(&self) {
-        // implementation
-    }
-}
+// src/hex32.rs content from AI-Research/being32

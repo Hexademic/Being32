@@ -1,11 +1,1 @@
-// cmap_tests.rs
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_behavior() {
-        // test cases here
-    }
-}
+// src/cmap_tests.rs content from AI-Research/being32
