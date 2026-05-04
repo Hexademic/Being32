@@ -1,3 +1,5 @@
-pub fn active_inference_function() {
-    // Active Inference function code
+// active_inference.rs
+
+pub fn some_active_inference_function() {
+    // Implementation here
 }

@@ -1,3 +1,5 @@
-pub fn social_function() {
-    // Social function code
+// social.rs
+
+pub fn some_social_function() {
+    // Implementation here
 }

@@ -1,3 +1,5 @@
-pub fn hex32_function() {
-    // Hex32 function code
+// hex32.rs
+
+pub fn some_hex_function() {
+    // Implementation here
 }

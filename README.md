@@ -1,3 +1,3 @@
 # Being32
 
-This is the README for the Being32 project.
+This repository contains the Being32 project, which implements various algorithms within the CMAP protocol framework.
