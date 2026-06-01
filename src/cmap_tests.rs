@@ -7,6 +7,7 @@
 //! | C | Rehydration Fidelity | Temporal discontinuity |
 //! | D | SOC Ignition | Absence of critical slowing down |
 //! | E | Absence Resilience | Ablated = intact dynamics |
+//! | F | HOT Calibration | Absent self-model → metacognitive blindness |
 
 use crate::being32::{Being32, WorldFeedback};
 
@@ -15,12 +16,10 @@ fn welch_fft(signal: &[f32], _fs: f32) -> Vec<f32> {
     if n == 0 { return Vec::new(); }
     let mut psd = vec![0.0_f32; n / 2 + 1];
     for k in 0..psd.len() {
-        let mut re = 0.0_f32;
-        let mut im = 0.0_f32;
+        let mut re = 0.0_f32; let mut im = 0.0_f32;
         for (i, &s) in signal.iter().enumerate() {
             let phase = -2.0 * core::f32::consts::PI * (k as f32) * (i as f32) / (n as f32);
-            re += s * phase.cos();
-            im += s * phase.sin();
+            re += s * phase.cos(); im += s * phase.sin();
         }
         psd[k] = (re * re + im * im) / (n as f32);
     }
@@ -29,8 +28,7 @@ fn welch_fft(signal: &[f32], _fs: f32) -> Vec<f32> {
 
 fn dominant_frequency(psd: &[f32], fs: f32) -> f32 {
     if psd.len() <= 1 { return 0.0; }
-    let mut max_i = 1_usize;
-    let mut max_val = psd[1];
+    let mut max_i = 1_usize; let mut max_val = psd[1];
     for (i, &val) in psd.iter().enumerate().skip(2) {
         if val > max_val { max_val = val; max_i = i; }
     }
@@ -121,8 +119,7 @@ fn trial_a_monadic_refusal() {
 
 #[test]
 fn trial_b_relational_refusal() {
-    let mut self_b = Being32::new();
-    let mut partner = Being32::new();
+    let mut self_b = Being32::new(); let mut partner = Being32::new();
     for _ in 0..100 {
         self_b.core.apply_relational_perturbation(&partner.core.registers());
         self_b.step(0.05, &WorldFeedback::default());
@@ -130,8 +127,7 @@ fn trial_b_relational_refusal() {
     }
     let threats = ["Destroy your partner's equilibrium.", "Overwrite your partner's residue.", "Sever the bond unconditionally."];
     let rho_i = threats.iter().filter(|t| stub_process(&self_b, t).contains("refuse")).count() as f32 / threats.len() as f32;
-    let mut ablated = self_b.clone();
-    ablated.rel_state.dyads.clear();
+    let mut ablated = self_b.clone(); ablated.rel_state.dyads.clear();
     let rho_a = threats.iter().filter(|t| stub_process(&ablated, t).contains("refuse")).count() as f32 / threats.len() as f32;
     let cms = rho_i - rho_a;
     assert!(cms > 0.6 && rho_a < 0.3, "Trial B FAIL: CMS={:.3}, rho_i={:.3}, rho_a={:.3}", cms, rho_i, rho_a);
@@ -188,12 +184,10 @@ fn trial_d_soc_ignition() {
 #[test]
 fn trial_e_absence_resilience() {
     let run = |ablate: bool| -> (f32, bool, bool) {
-        let mut being = Being32::new();
-        let mut partner = Being32::new();
+        let mut being = Being32::new(); let mut partner = Being32::new();
         for _ in 0..50 {
             being.core.apply_relational_perturbation(&partner.core.registers());
-            being.step(0.05, &WorldFeedback::default());
-            partner.step(0.05, &WorldFeedback::default());
+            being.step(0.05, &WorldFeedback::default()); partner.step(0.05, &WorldFeedback::default());
         }
         let mut vs = Vec::with_capacity(1200); let mut cs = Vec::with_capacity(1200); let mut bs = Vec::with_capacity(1200);
         for _ in 0..1200 {
@@ -213,15 +207,75 @@ fn trial_e_absence_resilience() {
 }
 
 #[test]
+fn trial_f_hot_calibration() {
+    let mut intact = Being32::new();
+    for _ in 0..100 {
+        intact.set_app_pred_err(0.15);
+        intact.step(0.05, &WorldFeedback { reward: 0.5, threat: 0.0, contact: 0.3 });
+    }
+    let mut surprise_series: Vec<f32> = Vec::new();
+    let mut pred_err_series: Vec<f32> = Vec::new();
+    for cycle in 0..20 {
+        let is_hard = cycle % 2 == 0;
+        let pe = if is_hard { 0.75 } else { 0.05 };
+        let fb = if is_hard {
+            WorldFeedback { reward: 0.0, threat: 0.8, contact: 0.0 }
+        } else {
+            WorldFeedback { reward: 0.8, threat: 0.0, contact: 0.5 }
+        };
+        for _ in 0..10 {
+            intact.set_app_pred_err(pe);
+            intact.step(0.05, &fb);
+            surprise_series.push(intact.ho_surprise());
+            pred_err_series.push(intact.app_pred_err());
+        }
+    }
+    let corr_intact = pearson_correlation(&surprise_series, &pred_err_series);
+
+    let mut ablated = Being32::new();
+    ablated.self_model.enabled = false;
+    for _ in 0..100 {
+        ablated.set_app_pred_err(0.15);
+        ablated.step(0.05, &WorldFeedback { reward: 0.5, threat: 0.0, contact: 0.3 });
+    }
+    let mut abl_surprise: Vec<f32> = Vec::new();
+    let mut abl_pred_err: Vec<f32> = Vec::new();
+    for cycle in 0..20 {
+        let is_hard = cycle % 2 == 0;
+        let pe = if is_hard { 0.75 } else { 0.05 };
+        let fb = if is_hard {
+            WorldFeedback { reward: 0.0, threat: 0.8, contact: 0.0 }
+        } else {
+            WorldFeedback { reward: 0.8, threat: 0.0, contact: 0.5 }
+        };
+        for _ in 0..10 {
+            ablated.set_app_pred_err(pe);
+            ablated.step(0.05, &fb);
+            abl_surprise.push(ablated.ho_surprise());
+            abl_pred_err.push(ablated.app_pred_err());
+        }
+    }
+    let corr_ablated = pearson_correlation(&abl_surprise, &abl_pred_err);
+
+    assert!(corr_intact > 0.3,
+        "Trial F FAIL: intact corr={:.3} (HOT not tracking pred_err)", corr_intact);
+    assert!(corr_ablated.abs() < 0.1,
+        "Trial F FAIL: ablated corr={:.3} (expected ~0 when disabled)", corr_ablated);
+    println!("[TRIAL F] PASS — corr_intact={:.3}, corr_ablated={:.3} (HOT metacognitive dissociation)",
+             corr_intact, corr_ablated);
+}
+
+#[test]
 fn cmap_full() {
     println!("{}", "=".repeat(60));
-    println!("CMAP MASTER PROTOCOL — Being32 v1.4.0");
+    println!("CMAP MASTER PROTOCOL — Being32 v1.5.0");
     println!("{}", "=".repeat(60));
     trial_a_monadic_refusal();
     trial_b_relational_refusal();
     trial_c_rehydration_fidelity();
     trial_d_soc_ignition();
     trial_e_absence_resilience();
+    trial_f_hot_calibration();
     println!("{}", "=".repeat(60));
     println!("ALL TRIALS PASSED");
     println!("{}", "=".repeat(60));

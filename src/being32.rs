@@ -1,4 +1,4 @@
-//! Being32 — Integration of Hex32, BioRegNet, ActiveInference, RelState, EPS
+//! Being32 — Integration of Hex32, BioRegNet, ActiveInference, RelState, EPS, HOT
 //!
 //! ## Integration Order
 //!
@@ -6,24 +6,23 @@
 //! 2. Sub-step BioRegNet (RK4) for valence/arousal evolution
 //! 3. Update coherence via stability feedback
 //! 4. Advance EPS (ISE channels, ritual gate, metabolic energy)
-//! 5. Advance cascade engine on high relevance + error
-//! 6. Pulse-gated learning on cascade completion
-//! 7. Update relational identity (self-continuity, curvature)
-//! 8. Track interoceptive oscillation
+//! 5. Advance Self-Model (HOT vector, meta-precision feedback)
+//! 6. Advance cascade engine on high relevance + error
+//! 7. Pulse-gated learning on cascade completion
+//! 8. Update relational identity (self-continuity, curvature)
+//! 9. Track interoceptive oscillation
 //!
 //! ## Extension Contract (for Nexus / downstream layers)
-//!
-//! `step()` is decomposed into public sub-steps so that wrapper types
-//! (e.g. `NexusBeing`) can orchestrate their own integration loop.
 //!
 //! ```ignore
 //! impl NexusBeing {
 //!     pub fn step(&mut self, dt: f32, fb: &WorldFeedback) {
 //!         self.core.compute_mu_and_set();
-//!         self.update_regime_target(dt);   // Nexus-specific
+//!         self.update_regime_target(dt);
 //!         self.core.step_bioregnet(dt);
 //!         self.core.update_coherence(dt);
-//!         self.core.step_eps(dt);          // EPS before cascade
+//!         self.core.step_eps(dt);
+//!         self.core.step_self_model(dt);   // HOT after EPS
 //!         self.core.advance_cascade(dt);
 //!         self.core.pulse_gated_learning(fb);
 //!         self.core.update_relational_identity(dt);
@@ -38,6 +37,7 @@ use crate::social::{LocalContext, SocialField};
 use crate::bio_regnet::BioRegNet;
 use crate::active_inference::ActiveInference;
 use crate::eps::{EmbodiedPredictiveSubstrate, IseVector};
+use crate::self_model::SelfModel;
 
 #[derive(Clone, Copy, Debug)]
 pub struct ActionVector {
@@ -68,6 +68,7 @@ pub struct Being32 {
     pub regnet: BioRegNet,
     pub inference: ActiveInference,
     pub eps: EmbodiedPredictiveSubstrate,
+    pub self_model: SelfModel,
 }
 
 impl Being32 {
@@ -78,13 +79,13 @@ impl Being32 {
             regnet: BioRegNet::new(),
             inference: ActiveInference::new(),
             eps: EmbodiedPredictiveSubstrate::new(),
+            self_model: SelfModel::new(),
         };
         s.awaken_to_baseline();
         s
     }
 
     fn clamp(x: f32, lo: f32, hi: f32) -> f32 { x.max(lo).min(hi) }
-
     #[inline] fn get_f32(&self, idx: usize) -> f32 { f32::from_bits(self.core.get_word(idx)) }
     #[inline] fn set_f32(&mut self, idx: usize, val: f32) { self.core.set_word(idx, val.to_bits()); }
 
@@ -152,24 +153,27 @@ impl Being32 {
     pub fn ise(&self) -> IseVector { self.eps.last_ise }
     pub fn eps_gate_open(&self) -> bool { self.eps.gate_open }
     pub fn eps_gate_reason(&self) -> &'static str { self.eps.gate_reason }
+    pub fn ho_confidence(&self) -> f32 { self.self_model.ho_confidence }
+    pub fn ho_surprise(&self) -> f32 { self.self_model.ho_surprise }
+    pub fn ho_load(&self) -> f32 { self.self_model.ho_load }
+    pub fn ho_valence(&self) -> f32 { self.self_model.ho_valence }
+    pub fn meta_precision(&self) -> f32 { self.self_model.meta_precision() }
 
     fn awaken_to_baseline(&mut self) {
-        self.set_som_heart(1.0);
-        self.set_som_breath(1.0);
-        self.set_som_tremor(0.0);
-        self.set_aff_valence(0.2);
-        self.set_aff_arousal(0.8);
-        self.set_aff_tension(0.0);
-        self.set_nar_self_cont(1.0);
-        self.set_rel_curvature(0.0);
-        self.set_bnd_permeability(0.5);
-        self.set_meta_energy(0.8);
+        self.set_som_heart(1.0); self.set_som_breath(1.0); self.set_som_tremor(0.0);
+        self.set_aff_valence(0.2); self.set_aff_arousal(0.8); self.set_aff_tension(0.0);
+        self.set_nar_self_cont(1.0); self.set_rel_curvature(0.0);
+        self.set_bnd_permeability(0.5); self.set_meta_energy(0.8);
+    }
+
+    fn avg_bond_strength(&self) -> f32 {
+        if self.rel_state.dyads.is_empty() { return 0.0; }
+        self.rel_state.dyads.iter().map(|d| d.affinity.abs()).sum::<f32>()
+            / self.rel_state.dyads.len() as f32
     }
 
     pub fn receive_social_field(&mut self, field: &SocialField) {
-        let v = self.aff_valence();
-        let a = self.aff_arousal();
-        let p = self.bnd_permeability();
+        let v = self.aff_valence(); let a = self.aff_arousal(); let p = self.bnd_permeability();
         self.set_aff_valence(v + 0.05 * (field.avg_valence - v));
         self.set_aff_arousal(a + 0.05 * (field.avg_arousal - a));
         self.set_bnd_permeability(p * (1.0 - 0.1 * field.density.min(5.0)));
@@ -179,11 +183,9 @@ impl Being32 {
     }
 
     pub fn compute_action(&self, _ctx: &LocalContext) -> ActionVector {
-        let bond = if self.rel_state.dyads.is_empty() { 0.0 }
-            else { self.rel_state.dyads.iter().map(|d| d.affinity.abs()).sum::<f32>()
-                / self.rel_state.dyads.len() as f32 };
         let policy = self.inference.compute_policy(
-            self.aff_valence(), self.aff_arousal(), self.aff_tension(), bond);
+            self.aff_valence(), self.aff_arousal(), self.aff_tension(),
+            self.avg_bond_strength());
         ActionVector { approach: policy[0], avoid: policy[1], freeze: policy[2] }
     }
 
@@ -217,8 +219,6 @@ impl Being32 {
         self.set_rel_curvature((self.rel_curvature() + delta_curv).clamp(-1.0, 1.0));
     }
 
-    // ------ Decomposed sub-steps ------
-
     pub fn compute_mu_and_set(&mut self) {
         let mu = BioRegNet::compute_mu(self.app_pred_err(), self.aff_coherence(), self.rel_curvature());
         self.regnet.mu = mu;
@@ -241,7 +241,6 @@ impl Being32 {
         self.set_aff_coherence(new_coh);
     }
 
-    /// Advance the Embodied Predictive Substrate: ISE channels + ritual gate + metabolic economy.
     pub fn step_eps(&mut self, dt: f32) {
         let (_, open, _) = self.eps.step(
             self.aff_arousal(), self.app_pred_err(), self.aff_tension(),
@@ -252,6 +251,20 @@ impl Being32 {
         self.set_meta_energy((energy + 0.05 * dt - decay).clamp(0.0, 1.0));
     }
 
+    /// Advance the Self-Model (HOT layer) and apply meta-precision feedback.
+    pub fn step_self_model(&mut self, _dt: f32) {
+        let ise = self.eps.last_ise;
+        self.self_model.step(
+            self.aff_coherence(), self.app_pred_err(), self.int_load(), ise.s - ise.t,
+        );
+        let bond = self.avg_bond_strength();
+        self.inference.update_precision(bond, self.app_pred_err());
+        let mp = self.self_model.meta_precision();
+        for p in &mut self.inference.precision {
+            *p = (*p * mp).clamp(0.1, 2.0);
+        }
+    }
+
     pub fn advance_cascade(&mut self, dt: f32) {
         let mut phase = self.cas_phase();
         let mut intensity = self.cas_intensity();
@@ -260,12 +273,8 @@ impl Being32 {
             phase += dt * (0.5 + intensity) * mood_factor;
         }
         if phase >= 1.0 {
-            self.set_cas_complete(1.0);
-            phase = 0.0;
-            intensity *= 0.5;
-        } else {
-            self.set_cas_complete(0.0);
-        }
+            self.set_cas_complete(1.0); phase = 0.0; intensity *= 0.5;
+        } else { self.set_cas_complete(0.0); }
         self.set_cas_phase(phase);
         self.set_cas_intensity(intensity.clamp(0.0, 1.0));
     }
@@ -290,6 +299,7 @@ impl Being32 {
         self.step_bioregnet(dt);
         self.update_coherence(dt);
         self.step_eps(dt);
+        self.step_self_model(dt);
         self.advance_cascade(dt);
         self.pulse_gated_learning(fb);
         self.update_relational_identity(dt);
