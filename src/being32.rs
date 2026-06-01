@@ -1,4 +1,4 @@
-//! Being32 — Integration of Hex32, BioRegNet, ActiveInference, RelState, EPS, HOT
+//! Being32 — Integration of Hex32, BioRegNet, ActiveInference, RelState, EPS, HOT, ActionModel
 //!
 //! ## Integration Order
 //!
@@ -11,6 +11,7 @@
 //! 7. Pulse-gated learning on cascade completion
 //! 8. Update relational identity (self-continuity, curvature)
 //! 9. Track interoceptive oscillation
+//! 10. Step ActionModel (observe error, select policy, generate prediction) [LAST]
 //!
 //! ## Extension Contract (for Nexus / downstream layers)
 //!
@@ -27,6 +28,7 @@
 //!         self.core.pulse_gated_learning(fb);
 //!         self.core.update_relational_identity(dt);
 //!         self.core.track_interoception(dt);
+//!         self.core.step_action_model(fb);  // LAST — closes action loop
 //!     }
 //! }
 //! ```
@@ -38,6 +40,7 @@ use crate::bio_regnet::BioRegNet;
 use crate::active_inference::ActiveInference;
 use crate::eps::{EmbodiedPredictiveSubstrate, IseVector};
 use crate::self_model::SelfModel;
+use crate::action_model::ActionModel;
 
 #[derive(Clone, Copy, Debug)]
 pub struct ActionVector {
@@ -69,6 +72,7 @@ pub struct Being32 {
     pub inference: ActiveInference,
     pub eps: EmbodiedPredictiveSubstrate,
     pub self_model: SelfModel,
+    pub action_model: ActionModel,
 }
 
 impl Being32 {
@@ -80,6 +84,7 @@ impl Being32 {
             inference: ActiveInference::new(),
             eps: EmbodiedPredictiveSubstrate::new(),
             self_model: SelfModel::new(),
+            action_model: ActionModel::new(),
         };
         s.awaken_to_baseline();
         s
@@ -158,6 +163,9 @@ impl Being32 {
     pub fn ho_load(&self) -> f32 { self.self_model.ho_load }
     pub fn ho_valence(&self) -> f32 { self.self_model.ho_valence }
     pub fn meta_precision(&self) -> f32 { self.self_model.meta_precision() }
+    pub fn action_pred_err(&self) -> f32 { self.action_model.action_pred_err }
+    pub fn action_calibrated(&self) -> bool { self.action_model.is_calibrated() }
+    pub fn last_policy(&self) -> usize { self.action_model.last_policy }
 
     fn awaken_to_baseline(&mut self) {
         self.set_som_heart(1.0); self.set_som_breath(1.0); self.set_som_tremor(0.0);
@@ -294,6 +302,19 @@ impl Being32 {
         self.set_int_osc(osc.clamp(-1.0, 1.0));
     }
 
+    /// Close the action loop: observe actual feedback vs last prediction,
+    /// update `meta_error_corr` (register 30), select new policy, generate prediction.
+    pub fn step_action_model(&mut self, fb: &WorldFeedback) {
+        self.action_model.observe(fb.reward, fb.threat, fb.contact);
+        let accuracy = 1.0 - self.action_model.ema_action_pred_err;
+        let mec = self.meta_error_corr();
+        self.set_meta_error_corr(mec + 0.02 * (accuracy - mec));
+        let policy = self.inference.compute_policy(
+            self.aff_valence(), self.aff_arousal(), self.aff_tension(),
+            self.avg_bond_strength());
+        self.action_model.select_and_predict(policy);
+    }
+
     pub fn step(&mut self, dt: f32, fb: &WorldFeedback) {
         self.compute_mu_and_set();
         self.step_bioregnet(dt);
@@ -304,6 +325,7 @@ impl Being32 {
         self.pulse_gated_learning(fb);
         self.update_relational_identity(dt);
         self.track_interoception(dt);
+        self.step_action_model(fb);
     }
 
     pub fn perceptual_radius(&self) -> f32 {
